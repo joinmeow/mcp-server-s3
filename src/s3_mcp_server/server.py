@@ -255,10 +255,11 @@ async def handle_call_tool(
     try:
         match name:
             case "ListBuckets":
+                buckets = boto3_s3_client.list_buckets(**arguments)
                 return [
                     TextContent(
                         type="text",
-                        text=str(s3_resource.configured_buckets)
+                        text=str(buckets)
                     )
                 ]
             case "ListObjectsV2":
