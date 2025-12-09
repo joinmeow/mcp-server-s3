@@ -23,7 +23,7 @@ server = Server("s3_service")
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp_s3_server")
 
 # Get max buckets from environment or use default
@@ -208,8 +208,7 @@ async def handle_list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "ContinuationToken": {"type": "string", "description": "ContinuationToken indicates to Amazon S3 that the list is being continued on this bucket with a token. ContinuationToken is obfuscated and is not a real key. You can use this ContinuationToken for pagination of the list results. Length Constraints: Minimum length of 0. Maximum length of 1024."},
-                    "MaxBuckets": {"type": "integer", "description": "Maximum number of buckets to be returned in response. When the number is more than the count of buckets that are owned by an AWS account, return all the buckets in response. Valid Range: Minimum value of 1. Maximum value of 10000."},
+                    "start_after": {"type": "string", "description": "Start listing after this bucket name"}
                 },
                 "required": [],
             },
@@ -220,15 +219,11 @@ async def handle_list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "Bucket": {"type": "string", "description": "When you use this operation with a directory bucket, you must use virtual-hosted-style requests in the format Bucket_name.s3express-az_id.region.amazonaws.com. Path-style requests are not supported. Directory bucket names must be unique in the chosen Availability Zone. Bucket names must follow the format bucket_base_name--az-id--x-s3 (for example, DOC-EXAMPLE-BUCKET--usw2-az1--x-s3)."},
-                    "ContinuationToken": {"type": "string", "description": "ContinuationToken indicates to Amazon S3 that the list is being continued on this bucket with a token. ContinuationToken is obfuscated and is not a real key. You can use this ContinuationToken for pagination of the list results."},
-                    "EncodingType": {"type": "string", "description": "Encoding type used by Amazon S3 to encode the object keys in the response. Responses are encoded only in UTF-8. An object key can contain any Unicode character. However, the XML 1.0 parser can't parse certain characters, such as characters with an ASCII value from 0 to 10. For characters that aren't supported in XML 1.0, you can add this parameter to request that Amazon S3 encode the keys in the response."},
-                    "FetchOwner": {"type": "boolean", "description": "The owner field is not present in ListObjectsV2 by default. If you want to return the owner field with each key in the result, then set the FetchOwner field to true."},
-                    "MaxKeys": {"type": "integer", "description": "Sets the maximum number of keys returned in the response. By default, the action returns up to 1,000 key names. The response might contain fewer keys but will never contain more."},
-                    "Prefix": {"type": "string", "description": "Limits the response to keys that begin with the specified prefix."},
-                    "StartAfter": {"type": "string", "description": "StartAfter is where you want Amazon S3 to start listing from. Amazon S3 starts listing after this specified key. StartAfter can be any key in the bucket."}
+                    "bucket_name": {"type": "string", "description": "When you use this operation with a directory bucket, you must use virtual-hosted-style requests in the format Bucket_name.s3express-az_id.region.amazonaws.com. Path-style requests are not supported. Directory bucket names must be unique in the chosen Availability Zone. Bucket names must follow the format bucket_base_name--az-id--x-s3 (for example, DOC-EXAMPLE-BUCKET--usw2-az1--x-s3)."},
+                    "prefix": {"type": "string", "description": "the prefix of the keys to list."},
+                    "max_keys": {"type": "integer", "description": "Sets the maximum number of keys returned in the response. By default, the action returns up to 1,000 key names. The response might contain fewer keys but will never contain more."}
                 },
-                "required": ["Bucket"],
+                "required": ["bucket_name"],
             },
         ),
         Tool(
@@ -237,11 +232,9 @@ async def handle_list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "Bucket": {"type": "string", "description": "Directory buckets - When you use this operation with a directory bucket, you must use virtual-hosted-style requests in the format Bucket_name.s3express-az_id.region.amazonaws.com. Path-style requests are not supported. Directory bucket names must be unique in the chosen Availability Zone. Bucket names must follow the format bucket_base_name--az-id--x-s3 (for example, DOC-EXAMPLE-BUCKET--usw2-az1--x-s3)."},
-                    "Key": {"type": "string", "description": "Key of the object to get. Length Constraints: Minimum length of 1."},
-                    "Range": {"type": "string", "description": "Downloads the specified byte range of an object."},
-                    "VersionId": {"type": "string", "description": "Version ID used to reference a specific version of the object. By default, the GetObject operation returns the current version of an object. To return a different version, use the versionId subresource."},
-                    "PartNumber": {"type": "integer", "description": "Part number of the object being read. This is a positive integer between 1 and 10,000. Effectively performs a 'ranged' GET request for the part specified. Useful for downloading just a part of an object."},
+                    "bucket_name": {"type": "string", "description": "Directory buckets - When you use this operation with a directory bucket, you must use virtual-hosted-style requests in the format Bucket_name.s3express-az_id.region.amazonaws.com. Path-style requests are not supported. Directory bucket names must be unique in the chosen Availability Zone. Bucket names must follow the format bucket_base_name--az-id--x-s3 (for example, DOC-EXAMPLE-BUCKET--usw2-az1--x-s3)."},
+                    "key": {"type": "string", "description": "Key of the object to get. Length Constraints: Minimum length of 1."},
+                    "max_retries": {"type": "string", "description": "max number of attempts to download the file."},
                 },
                 "required": ["Bucket", "Key"]
             }
@@ -252,10 +245,13 @@ async def handle_list_tools() -> list[Tool]:
 async def handle_call_tool(
     name: str, arguments: dict | None
 ) -> list[TextContent | ImageContent | EmbeddedResource]:
+    logger.info(f"handle_call_tool got name {name}, args {arguments}")
     try:
         match name:
             case "ListBuckets":
-                buckets = boto3_s3_client.list_buckets(**arguments)
+                start_after = arguments.get("StartAfter", None) if arguments else None
+                buckets = await s3_resource.list_buckets(start_after)
+                logger.info(f"listBuckets returning buckets {buckets}")
                 return [
                     TextContent(
                         type="text",
@@ -263,7 +259,18 @@ async def handle_call_tool(
                     )
                 ]
             case "ListObjectsV2":
-                objects = boto3_s3_client.list_objects_v2(**arguments)
+                args = {
+                    "bucket_name": arguments['bucket_name']
+                }
+                if 'prefix' in arguments:
+                    args['prefix'] = arguments['prefix']
+                if "max_retries" in arguments:
+                    args['max_retries'] = arguments['max_retries']
+
+                objects = await s3_resource.list_objects(**args)
+
+                logger.info(f"ListObjectsV2 returning objects {objects}")
+
                 return [
                     TextContent(
                         type="text",
@@ -271,8 +278,16 @@ async def handle_call_tool(
                     )
                 ]
             case "GetObject":
-                response = boto3_s3_client.get_object(**arguments)
+                args = {
+                    "bucket_name": arguments['bucket_name'],
+                    "key": arguments['key']
+                }
+                if "max_retries" in arguments:
+                    args['max_retries'] = arguments['max_retries']
+                response = await s3_resource.get_object(**args)
+                logger.info(f"GetObject got response {response}")
                 file_content = response['Body'].read().decode('utf-8')
+                logger.info(f"GetObject got file_content {file_content}")
                 return [
                     TextContent(
                         type="text",

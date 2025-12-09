@@ -15,12 +15,12 @@ class S3Resource:
 
     def __init__(self, region_name: str = None, profile_name: str = None, max_buckets: int = 5):
         """
-              Initialize S3 resource provider
-              Args:
-                  region_name: AWS region name
-                  profile_name: AWS profile name
-                  max_buckets: Maximum number of buckets to process (default: 5)
-              """
+        Initialize S3 resource provider
+        Args:
+            region_name: AWS region name
+            profile_name: AWS profile name
+            max_buckets: Maximum number of buckets to process (default: 5)
+        """
         # Configure boto3 with retries and timeouts
         self.config = Config(
             retries=dict(
@@ -103,9 +103,10 @@ class S3Resource:
             prefix: Object prefix for filtering
             max_keys: Maximum number of keys to return
         """
-        #
+        logger.info(f"s3_resource.list_objects received bucket {bucket_name}, prefix {prefix}")
+
         if self.configured_buckets and bucket_name not in self.configured_buckets:
-            logger.warning(f"Bucket {bucket_name} not in configured bucket list")
+            logger.warning(f"list_objects failed! Bucket {bucket_name} not in configured bucket list")
             return []
 
         async with self.session.client('s3', region_name=self.region_name) as s3:
@@ -114,6 +115,8 @@ class S3Resource:
                 Prefix=prefix,
                 MaxKeys=max_keys
             )
+            logger.info(f"s3_resource.list_objects got response {response}")
+
             return response.get('Contents', [])
 
     async def get_object(self, bucket_name: str, key: str, max_retries: int = 3) -> Dict[str, Any]:
@@ -121,8 +124,10 @@ class S3Resource:
         Get object from S3 using streaming to handle large files and PDFs reliably.
         The method reads the stream in chunks and concatenates them before returning.
         """
+        logger.info(f"s3_resource.get_object received bucket {bucket_name}, key {key}")
+
         if self.configured_buckets and bucket_name not in self.configured_buckets:
-            raise ValueError(f"Bucket {bucket_name} not in configured bucket list")
+            raise ValueError(f"get_object failed! Bucket {bucket_name} not in configured bucket list")
 
         attempt = 0
         last_exception = None
