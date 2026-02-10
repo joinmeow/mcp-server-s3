@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 from typing import TypedDict
 import aioboto3
-import asyncio
 from botocore.config import Config
 from types_aiobotocore_s3.type_defs import BucketTypeDef, ObjectTypeDef
 
@@ -124,38 +123,22 @@ class S3Resource:
                 "last_modified": last_modified.isoformat() if last_modified else None,
             }
 
-    async def get_object(self, bucket_name: str, key: str, max_retries: int = 3) -> S3ObjectData:
+    async def get_object(self, bucket_name: str, key: str) -> S3ObjectData:
         """Download an S3 object, reading the full stream into bytes."""
         self._check_bucket(bucket_name)
+        async with self.session.client('s3', region_name=self.region_name, config=self.config) as s3:
+            response = await s3.get_object(Bucket=bucket_name, Key=key)
 
-        attempt = 0
-        last_exception: Exception | None = None
+            chunks: list[bytes] = []
+            async for chunk in response['Body']:
+                chunks.append(chunk)
 
-        while attempt < max_retries:
-            try:
-                async with self.session.client('s3', region_name=self.region_name, config=self.config) as s3:
-                    response = await s3.get_object(Bucket=bucket_name, Key=key)
+            response['Body'] = b''.join(chunks)
+            return response  # type: ignore[return-value]
 
-                    chunks: list[bytes] = []
-                    async for chunk in response['Body']:
-                        chunks.append(chunk)
-
-                    response['Body'] = b''.join(chunks)
-                    return response  # type: ignore[return-value]
-
-            except Exception as e:
-                last_exception = e
-                if 'NoSuchKey' in str(e):
-                    raise
-                attempt += 1
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-
-        raise last_exception or Exception("Failed to get object after all retries")
-
-    async def save_object_to_file(self, bucket_name: str, key: str, output_path: str, max_retries: int = 3) -> SaveResult:
+    async def save_object_to_file(self, bucket_name: str, key: str, output_path: str) -> SaveResult:
         """Download an S3 object and save it to a local file."""
-        response = await self.get_object(bucket_name, key, max_retries)
+        response = await self.get_object(bucket_name, key)
         data = response['Body']
 
         if os.path.isdir(output_path) or output_path.endswith('/'):
@@ -183,7 +166,6 @@ class S3Resource:
         keys: list[str] | None = None,
         prefix: str | None = None,
         max_bytes: int | None = None,
-        max_retries: int = 3,
     ) -> BatchResult:
         """Download multiple S3 objects to a local directory."""
         if not keys and prefix is None:
@@ -216,7 +198,7 @@ class S3Resource:
 
                 relative = key[len(common_prefix):] if common_prefix else os.path.basename(key)
                 output_path = os.path.join(output_dir, relative)
-                result = await self.save_object_to_file(bucket_name, key, output_path, max_retries)
+                result = await self.save_object_to_file(bucket_name, key, output_path)
                 results["files"].append({"key": key, **result})
                 results["files_saved"] += 1
             except Exception as e:

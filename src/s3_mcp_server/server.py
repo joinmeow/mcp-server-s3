@@ -202,7 +202,6 @@ async def handle_call_tool(
                 output_path = arguments.get('output_path')
                 max_bytes = arguments.get('max_bytes')
                 extract_text = arguments.get('extract_text', False)
-                max_retries = int(arguments.get('max_retries', 3))
 
                 # Size guard — HEAD only, no body download
                 if max_bytes:
@@ -218,7 +217,7 @@ async def handle_call_tool(
                 # Save-to-disk mode
                 if output_path:
                     result = await s3_resource.save_object_to_file(
-                        bucket_name, key, output_path, max_retries=max_retries,
+                        bucket_name, key, output_path,
                     )
                     return [TextContent(type="text", text=json.dumps({
                         "key": key,
@@ -242,7 +241,7 @@ async def handle_call_tool(
                     }))]
 
                 # Inline mode — download full body
-                response = await s3_resource.get_object(bucket_name, key, max_retries=max_retries)
+                response = await s3_resource.get_object(bucket_name, key)
                 content_type = response.get("ContentType", "application/octet-stream")
                 data = response['Body']
                 last_modified = response.get("LastModified")
@@ -276,7 +275,6 @@ async def handle_call_tool(
                     keys=arguments.get('keys'),
                     prefix=arguments.get('prefix'),
                     max_bytes=arguments.get('max_bytes'),
-                    max_retries=int(arguments.get('max_retries', 3)),
                 )
                 return [TextContent(type="text", text=json.dumps(result, default=str))]
 
