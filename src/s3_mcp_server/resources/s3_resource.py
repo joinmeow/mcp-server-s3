@@ -1,62 +1,75 @@
-import logging
 import os
-from typing import List, Dict, Any, Optional
+from datetime import datetime
+from typing import TypedDict
 import aioboto3
-import asyncio
 from botocore.config import Config
+from types_aiobotocore_s3.type_defs import BucketTypeDef, ObjectTypeDef
 
-logger = logging.getLogger("s3_mcp_server")
+
+class ObjectMetadata(TypedDict):
+    content_type: str
+    size_bytes: int
+    last_modified: str | None
+
+
+class S3ObjectData(TypedDict):
+    """The subset of S3 GetObject response fields we use, after reading the stream into bytes."""
+    Body: bytes
+    ContentType: str
+    ContentLength: int
+    LastModified: datetime | None
+
+
+class SaveResult(TypedDict):
+    saved_to: str
+    size_bytes: int
+    content_type: str
+    last_modified: str | None
+
+
+class BatchFileResult(TypedDict):
+    key: str
+    saved_to: str
+    size_bytes: int
+    content_type: str
+    last_modified: str | None
+
+
+class BatchError(TypedDict):
+    key: str
+    error: str
+
+
+class BatchResult(TypedDict):
+    files_saved: int
+    files: list[BatchFileResult]
+    errors: list[BatchError]
+
 
 class S3Resource:
-    """
-    S3 Resource provider that handles interactions with AWS S3 buckets.
-    Part of a collection of resource providers (S3, DynamoDB, etc.) for the MCP server.
-    """
+    """S3 Resource provider that handles interactions with AWS S3 buckets."""
 
-    def __init__(self, region_name: str = None, profile_name: str = None, max_buckets: int = 5):
-        """
-        Initialize S3 resource provider
-        Args:
-            region_name: AWS region name
-            profile_name: AWS profile name
-            max_buckets: Maximum number of buckets to process (default: 5)
-        """
-        # Configure boto3 with retries and timeouts
+    def __init__(self, region_name: str | None = None, profile_name: str | None = None, max_buckets: int = 5):
         self.config = Config(
-            retries=dict(
-                max_attempts=3,
-                mode='adaptive'
-            ),
+            retries=dict(max_attempts=3, mode='adaptive'),
             connect_timeout=5,
             read_timeout=60,
-            max_pool_connections=50
         )
-
         self.session = aioboto3.Session(
             profile_name=profile_name,
             region_name=region_name,
         )
         self.region_name = region_name
-        self.profile_name = profile_name
         self.max_buckets = max_buckets
         self.configured_buckets = self._get_configured_buckets()
 
-    def _get_configured_buckets(self) -> List[str]:
-        """
-        Get configured bucket names from environment variables.
-        Format in .env file:
-        S3_BUCKETS=bucket1,bucket2,bucket3
-        or
-        S3_BUCKET_1=bucket1
-        S3_BUCKET_2=bucket2
-        see env.example ############
-        """
-        # Try comma-separated list first
+    def _get_configured_buckets(self) -> list[str]:
+        """Read allowed bucket names from S3_BUCKETS or S3_BUCKET_N env vars."""
         bucket_list = os.getenv('S3_BUCKETS')
         if bucket_list:
             return [b.strip() for b in bucket_list.split(',')]
 
-        buckets = []
+        buckets: list[str] = []
         i = 1
         while True:
             bucket = os.getenv(f'S3_BUCKET_{i}')
@@ -64,117 +77,164 @@ class S3Resource:
                 break
             buckets.append(bucket.strip())
             i += 1
-
         return buckets
 
-    async def list_buckets(self, start_after: Optional[str] = None) -> List[dict]:
-        """
-        List S3 buckets using async client with pagination
-        """
-        async with self.session.client('s3', region_name=self.region_name) as s3:
-            if self.configured_buckets:
-                # If buckets are configured, only return those
-                response = await s3.list_buckets()
-                all_buckets = response.get('Buckets', [])
-                configured_bucket_list = [
-                    bucket for bucket in all_buckets
-                    if bucket['Name'] in self.configured_buckets
-                ]
-
-                #
-                if start_after:
-                    configured_bucket_list = [
-                        b for b in configured_bucket_list
-                        if b['Name'] > start_after
-                    ]
-
-                return configured_bucket_list[:self.max_buckets]
-            else:
-                # Default behavior if no buckets configured
-                response = await s3.list_buckets()
-                buckets = response.get('Buckets', [])
-
-                if start_after:
-                    buckets = [b for b in buckets if b['Name'] > start_after]
-
-                return buckets[:self.max_buckets]
-
-    async def list_objects(self, bucket_name: str, prefix: str = "", max_keys: int = 1000) -> List[dict]:
-        """
-        List objects in a specific bucket using async client with pagination
-        Args:
-            bucket_name: Name of the S3 bucket
-            prefix: Object prefix for filtering
-            max_keys: Maximum number of keys to return
-        """
-        logger.info(f"s3_resource.list_objects received bucket {bucket_name}, prefix {prefix}")
-
+    def _check_bucket(self, bucket_name: str) -> None:
+        """Raise if bucket_name is not in the configured allowlist."""
         if self.configured_buckets and bucket_name not in self.configured_buckets:
-            logger.warning(f"list_objects failed! Bucket {bucket_name} not in configured bucket list")
-            return []
+            raise ValueError(f"Bucket {bucket_name} not in configured bucket list")
 
+    async def list_buckets(self, start_after: str | None = None) -> list[BucketTypeDef]:
+        async with self.session.client('s3', region_name=self.region_name) as s3:
+            response = await s3.list_buckets()
+            buckets = response.get('Buckets', [])
+
+            if self.configured_buckets:
+                buckets = [b for b in buckets if b['Name'] in self.configured_buckets]
+
+            if start_after:
+                buckets = [b for b in buckets if b['Name'] > start_after]
+
+            return buckets[:self.max_buckets]
+
+    async def list_objects(self, bucket_name: str, prefix: str = "", max_keys: int = 1000) -> list[ObjectTypeDef]:
+        self._check_bucket(bucket_name)
         async with self.session.client('s3', region_name=self.region_name) as s3:
             response = await s3.list_objects_v2(
                 Bucket=bucket_name,
                 Prefix=prefix,
-                MaxKeys=max_keys
+                MaxKeys=max_keys,
             )
-            logger.info(f"s3_resource.list_objects got response {response}")
-
             return response.get('Contents', [])
 
-    async def get_object(self, bucket_name: str, key: str, max_retries: int = 3) -> Dict[str, Any]:
-        """
-        Get object from S3 using streaming to handle large files and PDFs reliably.
-        The method reads the stream in chunks and concatenates them before returning.
-        """
-        logger.info(f"s3_resource.get_object received bucket {bucket_name}, key {key}")
+    async def head_object(self, bucket_name: str, key: str) -> ObjectMetadata:
+        self._check_bucket(bucket_name)
+        async with self.session.client('s3', region_name=self.region_name, config=self.config) as s3:
+            response = await s3.head_object(Bucket=bucket_name, Key=key)
+            last_modified = response.get("LastModified")
+            return {
+                "content_type": response.get("ContentType", "application/octet-stream"),
+                "size_bytes": response.get("ContentLength", 0),
+                "last_modified": last_modified.isoformat() if last_modified else None,
+            }
 
-        if self.configured_buckets and bucket_name not in self.configured_buckets:
-            raise ValueError(f"get_object failed! Bucket {bucket_name} not in configured bucket list")
+    async def get_object(self, bucket_name: str, key: str) -> S3ObjectData:
+        """Download an S3 object, reading the full stream into bytes."""
+        self._check_bucket(bucket_name)
+        async with self.session.client('s3', region_name=self.region_name, config=self.config) as s3:
+            response = await s3.get_object(Bucket=bucket_name, Key=key)
 
-        attempt = 0
-        last_exception = None
-        chunk_size = 69 * 1024  # Using same chunk size as example for proven performance
+            chunks: list[bytes] = []
+            async for chunk in response['Body']:
+                chunks.append(chunk)
 
-        while attempt < max_retries:
+            response['Body'] = b''.join(chunks)
+            return response  # type: ignore[return-value]
+
+    async def save_object_to_file(self, bucket_name: str, key: str, output_path: str) -> SaveResult:
+        """Download an S3 object and save it to a local file."""
+        response = await self.get_object(bucket_name, key)
+        data = response['Body']
+
+        if os.path.isdir(output_path) or output_path.endswith('/'):
+            output_path = os.path.join(output_path, os.path.basename(key))
+
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+
+        with open(output_path, 'wb') as f:
+            f.write(data)
+
+        last_modified = response.get("LastModified")
+        return {
+            "saved_to": output_path,
+            "size_bytes": len(data),
+            "content_type": response.get("ContentType", "application/octet-stream"),
+            "last_modified": last_modified.isoformat() if last_modified else None,
+        }
+
+    async def get_objects_batch(
+        self,
+        bucket_name: str,
+        output_dir: str,
+        keys: list[str] | None = None,
+        prefix: str | None = None,
+        max_bytes: int | None = None,
+    ) -> BatchResult:
+        """Download multiple S3 objects to a local directory."""
+        if not keys and prefix is None:
+            raise ValueError("Either 'keys' or 'prefix' must be provided")
+
+        if not keys:
+            objects = await self.list_objects(bucket_name, prefix=prefix or "")
+            keys = [obj['Key'] for obj in objects]
+
+        os.makedirs(output_dir, exist_ok=True)
+        results: BatchResult = {"files_saved": 0, "files": [], "errors": []}
+
+        # Strip shared prefix so subdirectory structure is preserved under output_dir
+        # e.g. prefix="reports/" keys=["reports/a/1.pdf","reports/b/2.pdf"]
+        #   → output_dir/a/1.pdf, output_dir/b/2.pdf
+        common_prefix = os.path.commonprefix(keys) if keys else ""
+        # Trim to last '/' so we don't chop a partial directory name
+        common_prefix = common_prefix[:common_prefix.rfind('/') + 1]
+
+        for key in keys:
             try:
-                async with self.session.client('s3',
-                                               region_name=self.region_name,
-                                               config=self.config) as s3:
+                if max_bytes:
+                    meta = await self.head_object(bucket_name, key)
+                    if meta["size_bytes"] > max_bytes:
+                        results["errors"].append({
+                            "key": key,
+                            "error": f"Object size ({meta['size_bytes']} bytes) exceeds max_bytes limit ({max_bytes})",
+                        })
+                        continue
 
-                    # Get the object and its stream
-                    response = await s3.get_object(Bucket=bucket_name, Key=key)
-                    stream = response['Body']
-
-                    # Read the entire stream in chunks
-                    chunks = []
-                    async for chunk in stream:
-                        chunks.append(chunk)
-
-                    # Replace the stream with the complete data
-                    response['Body'] = b''.join(chunks)
-                    return response
-
+                relative = key[len(common_prefix):] if common_prefix else os.path.basename(key)
+                output_path = os.path.join(output_dir, relative)
+                result = await self.save_object_to_file(bucket_name, key, output_path)
+                results["files"].append({"key": key, **result})
+                results["files_saved"] += 1
             except Exception as e:
-                last_exception = e
-                if 'NoSuchKey' in str(e):
-                    raise
+                results["errors"].append({"key": key, "error": str(e)})
 
-                attempt += 1
-                if attempt < max_retries:
-                    wait_time = 2 ** attempt
-                    logger.warning(f"Attempt {attempt} failed, retrying in {wait_time} seconds: {str(e)}")
-                    await asyncio.sleep(wait_time)
-                continue
+        return results
 
-        raise last_exception or Exception("Failed to get object after all retries")
+    def extract_text_from_pdf(self, data: bytes) -> str:
+        """Extract text content from PDF bytes. Requires pymupdf."""
+        try:
+            import fitz  # pymupdf
+        except ImportError:
+            raise ImportError(
+                "pymupdf is required for PDF text extraction. "
+                "Install with: pip install 's3-mcp-server[pdf]' or pip install pymupdf"
+            )
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = [page.get_text() for page in doc]
+        doc.close()
+        return "\n".join(pages)
 
-    def is_text_file(self, key: str) -> bool:
-        """Determine if a file is text-based by its extension"""
+    def is_text_file(self, key: str, content_type: str = "") -> bool:
+        """Determine if a file is text-based by its extension or content type."""
         text_extensions = {
             '.txt', '.log', '.json', '.xml', '.yml', '.yaml', '.md',
             '.csv', '.ini', '.conf', '.py', '.js', '.html', '.css',
-            '.sh', '.bash', '.cfg', '.properties'
+            '.sh', '.bash', '.cfg', '.properties', '.ts', '.tsx',
+            '.jsx', '.sql', '.env', '.toml', '.rst', '.tex',
         }
-        return any(key.lower().endswith(ext) for ext in text_extensions)
+        if key.lower().endswith(tuple(text_extensions)):
+            return True
+
+        if content_type:
+            if content_type.startswith('text/'):
+                return True
+            if content_type in {
+                'application/json', 'application/xml',
+                'application/javascript', 'application/x-yaml',
+                'application/toml', 'application/sql',
+                'application/x-sh',
+            }:
+                return True
+
+        return False
