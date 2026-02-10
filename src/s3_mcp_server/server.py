@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import os
 
@@ -10,7 +9,7 @@ from dotenv import load_dotenv
 import logging
 from mcp.types import (
     LoggingLevel, EmptyResult, Tool,
-    TextContent, EmbeddedResource, BlobResourceContents,
+    TextContent,
 )
 
 from .resources.s3_resource import S3Resource
@@ -95,9 +94,8 @@ async def handle_list_tools() -> list[Tool]:
                 "Download a single file from S3. "
                 "Text files (.json, .csv, .txt, .xml, etc.) are returned as plain text. "
                 "For PDFs you need to read, set extract_text=true to get readable text from all pages. "
-                "For binary files (PDFs, images, archives), always use output_path to save to disk — "
-                "e.g. output_path='/tmp/report.pdf'. Without output_path, binary files are returned "
-                "as base64 which is not useful for further processing. "
+                "For binary files (PDFs, images, archives), use output_path to save to disk — "
+                "e.g. output_path='/tmp/report.pdf'. "
                 "Use max_bytes to check file size before downloading. "
                 "Every response includes metadata: content_type, size_bytes, last_modified."
             ),
@@ -133,7 +131,7 @@ async def handle_list_tools() -> list[Tool]:
                     "extract_text": {
                         "type": "boolean",
                         "description": (
-                            "Set to true when retrieving PDFs to get readable text instead of base64-encoded binary. "
+                            "Set to true when retrieving PDFs to get readable text. "
                             "The text is extracted from all pages and returned as plain text alongside metadata. "
                             "Recommended for any PDF you need to read or analyze."
                         ),
@@ -193,7 +191,7 @@ async def handle_list_tools() -> list[Tool]:
 @server.call_tool()
 async def handle_call_tool(
     name: str, arguments: dict | None,
-) -> list[TextContent | EmbeddedResource]:
+) -> list[TextContent]:
     try:
         match name:
             case "ListBuckets":
@@ -239,6 +237,21 @@ async def handle_call_tool(
                         **result,
                     }))]
 
+                # Check content type before downloading
+                meta = await s3_resource.head_object(bucket_name, key)
+
+                # Binary files without output_path → tell the agent to use output_path
+                if not s3_resource.is_text_file(key, meta["content_type"]) and not extract_text:
+                    return [TextContent(type="text", text=json.dumps({
+                        "error": (
+                            "Binary file cannot be returned inline. "
+                            "Use output_path to save to disk, or extract_text=true for PDFs."
+                        ),
+                        "key": key,
+                        "bucket": bucket_name,
+                        **meta,
+                    }))]
+
                 # Inline mode — download full body
                 response = await s3_resource.get_object(bucket_name, key, max_retries=max_retries)
                 content_type = response.get("ContentType", "application/octet-stream")
@@ -265,21 +278,7 @@ async def handle_call_tool(
                         }))]
 
                 # Text files → plain text
-                if s3_resource.is_text_file(key, content_type):
-                    return [metadata_content, TextContent(type="text", text=data.decode('utf-8'))]
-
-                # Binary files → base64 blob
-                return [
-                    metadata_content,
-                    EmbeddedResource(
-                        type="resource",
-                        resource=BlobResourceContents(
-                            blob=base64.b64encode(data).decode('utf-8'),
-                            uri=f"s3://{bucket_name}/{key}",
-                            mimeType=content_type,
-                        ),
-                    ),
-                ]
+                return [metadata_content, TextContent(type="text", text=data.decode('utf-8'))]
 
             case "GetObjects":
                 result = await s3_resource.get_objects_batch(
