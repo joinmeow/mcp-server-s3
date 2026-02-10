@@ -1,12 +1,9 @@
-import logging
 import os
 from datetime import datetime
 from typing import TypedDict
 import aioboto3
 from botocore.config import Config
 from types_aiobotocore_s3.type_defs import BucketTypeDef, ObjectTypeDef
-
-logger = logging.getLogger("s3_mcp_server")
 
 
 class ObjectMetadata(TypedDict):
@@ -57,14 +54,12 @@ class S3Resource:
             retries=dict(max_attempts=3, mode='adaptive'),
             connect_timeout=5,
             read_timeout=60,
-            max_pool_connections=50,
         )
         self.session = aioboto3.Session(
             profile_name=profile_name,
             region_name=region_name,
         )
         self.region_name = region_name
-        self.profile_name = profile_name
         self.max_buckets = max_buckets
         self.configured_buckets = self._get_configured_buckets()
 
@@ -228,7 +223,7 @@ class S3Resource:
             '.sh', '.bash', '.cfg', '.properties', '.ts', '.tsx',
             '.jsx', '.sql', '.env', '.toml', '.rst', '.tex',
         }
-        if any(key.lower().endswith(ext) for ext in text_extensions):
+        if key.lower().endswith(tuple(text_extensions)):
             return True
 
         if content_type:

@@ -242,9 +242,9 @@ async def handle_call_tool(
 
                 # Inline mode — download full body
                 response = await s3_resource.get_object(bucket_name, key)
-                content_type = response.get("ContentType", "application/octet-stream")
+                content_type = response["ContentType"]
                 data = response['Body']
-                last_modified = response.get("LastModified")
+                last_modified = response["LastModified"]
 
                 metadata = {
                     "key": key,
