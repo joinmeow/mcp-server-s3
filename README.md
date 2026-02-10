@@ -1,19 +1,28 @@
-# Sample S3 Model Context Protocol Server
+# S3 MCP Server
 
-An MCP server implementation for retrieving  data such as PDF's from S3.
+An MCP server for retrieving files from Amazon S3 — text, PDFs, images, and any other object type.
 
-## Features
-### Resources
-Expose AWS S3 Data through **Resources**. (think of these sort of like GET endpoints; they are used to load information into the LLM's context). Currently only **PDF** documents supported and limited to **1000** objects.
-
-
-### Tools
+## Tools
 - **ListBuckets**
   - Returns a list of all buckets owned by the authenticated sender of the request
 - **ListObjectsV2**
   - Returns some or all (up to 1,000) of the objects in a bucket with each request
 - **GetObject**
-  - Retrieves an object from Amazon S3. In the GetObject request, specify the full key name for the object. General purpose buckets - Both the virtual-hosted-style requests and the path-style requests are supported
+  - Retrieves an object from Amazon S3. Supports text and binary files.
+  - `output_path` — save directly to disk instead of returning inline content
+  - `max_bytes` — reject objects larger than this size before downloading
+  - `extract_text` — extract text from PDFs instead of returning binary (requires `pymupdf`)
+  - Every response includes metadata: `content_type`, `size_bytes`, `last_modified`
+  - Text-based content types (json, csv, xml, etc.) are returned as plain text automatically
+- **GetObjects**
+  - Batch download multiple objects to a local directory in a single call
+  - Provide explicit `keys` list or a `prefix` to list-and-download all matches
+  - `max_bytes` — skip oversized files
+  - Example: `GetObjects(bucket_name="b", prefix="35117/", output_dir="/tmp/35117/")`
+
+#### Optional PDF text extraction
+
+Install with `pip install 's3-mcp-server[pdf]'` to enable `extract_text=true` on GetObject.
 
 
 ## Configuration

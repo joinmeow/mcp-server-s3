@@ -1,14 +1,18 @@
 [project]
 name = "s3-mcp-server"
-version = "0.1.0"
-description = "A MCP server project"
+version = "0.2.0"
+description = "MCP server for retrieving files from Amazon S3"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
  "aioboto3>=13.2.0",
  "mcp>=1.0.0",
  "python-dotenv>=1.0.1",
+ "types-aiobotocore-s3>=3.1.2",
 ]
+
+[project.optional-dependencies]
+pdf = ["pymupdf>=1.24.0"]
 [[project.authors]]
 name = "Tonny Ouma"
 email = "tonouma@amazon.com"
