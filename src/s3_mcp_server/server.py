@@ -236,7 +236,7 @@ async def handle_list_tools() -> list[Tool]:
                     "key": {"type": "string", "description": "Key of the object to get. Length Constraints: Minimum length of 1."},
                     "max_retries": {"type": "string", "description": "max number of attempts to download the file."},
                 },
-                "required": ["Bucket", "Key"]
+                "required": ["bucket_name", "key"]
             }
         )
     ]
