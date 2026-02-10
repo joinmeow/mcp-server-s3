@@ -94,10 +94,10 @@ async def handle_list_tools() -> list[Tool]:
             description=(
                 "Download a single file from S3. "
                 "Text files (.json, .csv, .txt, .xml, etc.) are returned as plain text. "
-                "Binary files (PDFs, images) are returned as base64. "
-                "For PDFs, set extract_text=true to get readable text instead of base64 — "
-                "this is the recommended way to read PDF content. "
-                "Use output_path to save to disk instead of returning inline content. "
+                "For PDFs you need to read, set extract_text=true to get readable text from all pages. "
+                "For binary files (PDFs, images, archives), always use output_path to save to disk — "
+                "e.g. output_path='/tmp/report.pdf'. Without output_path, binary files are returned "
+                "as base64 which is not useful for further processing. "
                 "Use max_bytes to check file size before downloading. "
                 "Every response includes metadata: content_type, size_bytes, last_modified."
             ),
@@ -116,7 +116,8 @@ async def handle_list_tools() -> list[Tool]:
                         "type": "string",
                         "description": (
                             "Save the file to this local path instead of returning content inline. "
-                            "If path ends with '/' it is treated as a directory and the filename is taken from the key. "
+                            "Recommended for binary files (PDFs, images, archives) — "
+                            "e.g. '/tmp/downloads/report.pdf' or '/tmp/downloads/' (filename from key). "
                             "Parent directories are created automatically. "
                             "Response will be JSON with saved_to, size_bytes, content_type, last_modified."
                         ),
