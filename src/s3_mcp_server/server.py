@@ -95,9 +95,10 @@ async def handle_list_tools() -> list[Tool]:
                 "Download a single file from S3. "
                 "Text files (.json, .csv, .txt, .xml, etc.) are returned as plain text. "
                 "Binary files (PDFs, images) are returned as base64. "
+                "For PDFs, set extract_text=true to get readable text instead of base64 — "
+                "this is the recommended way to read PDF content. "
                 "Use output_path to save to disk instead of returning inline content. "
                 "Use max_bytes to check file size before downloading. "
-                "Use extract_text=true to get text from PDFs instead of binary. "
                 "Every response includes metadata: content_type, size_bytes, last_modified."
             ),
             inputSchema={
@@ -130,7 +131,11 @@ async def handle_list_tools() -> list[Tool]:
                     },
                     "extract_text": {
                         "type": "boolean",
-                        "description": "For PDF files only: extract and return the text content instead of binary. Requires pymupdf.",
+                        "description": (
+                            "Set to true when retrieving PDFs to get readable text instead of base64-encoded binary. "
+                            "The text is extracted from all pages and returned as plain text alongside metadata. "
+                            "Recommended for any PDF you need to read or analyze."
+                        ),
                     },
                     "max_retries": {
                         "type": "integer",
