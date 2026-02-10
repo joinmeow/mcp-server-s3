@@ -32,8 +32,12 @@ class S3Resource:
             max_pool_connections=50
         )
 
-        self.session = aioboto3.Session()
+        self.session = aioboto3.Session(
+            profile_name=profile_name,
+            region_name=region_name,
+        )
         self.region_name = region_name
+        self.profile_name = profile_name
         self.max_buckets = max_buckets
         self.configured_buckets = self._get_configured_buckets()
 

@@ -1,7 +1,5 @@
 import asyncio
-from importlib.resources import contents
 
-import boto3
 from mcp.server.models import InitializationOptions
 from mcp.server import NotificationOptions, Server, McpError
 import mcp.server.stdio
@@ -26,16 +24,17 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp_s3_server")
 
-# Get max buckets from environment or use default
+# Get configuration from environment
 max_buckets = int(os.getenv('S3_MAX_BUCKETS', '5'))
+aws_profile = os.getenv('AWS_PROFILE')
+aws_region = os.getenv('AWS_REGION', 'us-east-1')
 
-# Initialize S3 resource
+# Initialize S3 resource with profile support (e.g. for AWS SSO)
 s3_resource = S3Resource(
-    region_name=os.getenv('AWS_REGION', 'us-east-1'),
+    region_name=aws_region,
+    profile_name=aws_profile,
     max_buckets=max_buckets
 )
-
-boto3_s3_client = boto3.client('s3')
 
 @server.set_logging_level()
 async def set_logging_level(level: LoggingLevel) -> EmptyResult:
