@@ -60,7 +60,6 @@ async def handle_list_tools() -> list[Tool]:
                         "description": "Only return buckets whose name is alphabetically after this value. Used for pagination.",
                     },
                 },
-                "required": [],
             },
         ),
         Tool(
@@ -131,14 +130,9 @@ async def handle_list_tools() -> list[Tool]:
                     "extract_text": {
                         "type": "boolean",
                         "description": (
-                            "Set to true when retrieving PDFs to get readable text. "
-                            "The text is extracted from all pages and returned as plain text alongside metadata. "
-                            "Recommended for any PDF you need to read or analyze."
+                            "PDF only. Set to true to get readable text extracted from all pages "
+                            "instead of saving to disk. Ignored for non-PDF files."
                         ),
-                    },
-                    "max_retries": {
-                        "type": "integer",
-                        "description": "Number of download attempts on transient failures (default: 3).",
                     },
                 },
                 "required": ["bucket_name", "key"],
@@ -148,10 +142,9 @@ async def handle_list_tools() -> list[Tool]:
             name="GetObjects",
             description=(
                 "Batch download multiple files from S3 to a local directory in one call. "
-                "Provide either a list of keys OR a prefix to download all matching files. "
+                "You must provide either keys (explicit list) or prefix (download all matching). "
                 "Returns JSON summary: files_saved count, file paths with metadata, and any errors. "
-                "Example: GetObjects(bucket_name='my-bucket', prefix='case-35117/', output_dir='/tmp/35117/') "
-                "downloads all files under that prefix — replaces ListObjectsV2 + N separate GetObject calls."
+                "Example: GetObjects(bucket_name='my-bucket', prefix='case-35117/', output_dir='/tmp/35117/')."
             ),
             inputSchema={
                 "type": "object",
@@ -176,10 +169,6 @@ async def handle_list_tools() -> list[Tool]:
                     "max_bytes": {
                         "type": "integer",
                         "description": "Skip any file larger than this many bytes.",
-                    },
-                    "max_retries": {
-                        "type": "integer",
-                        "description": "Number of download attempts per file on transient failures (default: 3).",
                     },
                 },
                 "required": ["bucket_name", "output_dir"],
