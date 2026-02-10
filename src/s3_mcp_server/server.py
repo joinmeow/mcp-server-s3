@@ -1,7 +1,8 @@
 import asyncio
 
 from mcp.server.models import InitializationOptions
-from mcp.server import NotificationOptions, Server, McpError
+from mcp.server import NotificationOptions, Server
+from mcp import McpError
 import mcp.server.stdio
 from dotenv import load_dotenv
 import logging
