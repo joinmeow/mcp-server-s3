@@ -7,11 +7,9 @@ import mcp.server.stdio
 from dotenv import load_dotenv
 import logging
 import os
-from typing import List, Optional, Dict
-from mcp.types import Resource, LoggingLevel, EmptyResult, Tool, TextContent, ImageContent, EmbeddedResource, BlobResourceContents, ReadResourceResult
+from mcp.types import LoggingLevel, EmptyResult, Tool, TextContent, ImageContent, EmbeddedResource, BlobResourceContents
 
 from .resources.s3_resource import S3Resource
-from pydantic import AnyUrl
 
 import base64
 
@@ -47,158 +45,6 @@ async def set_logging_level(level: LoggingLevel) -> EmptyResult:
     )
     return EmptyResult()
 
-@server.list_resources()
-async def list_resources(start_after: Optional[str] = None) -> List[Resource]:
-    """
-    List S3 buckets and their contents as resources with pagination
-    Args:
-        start_after: Start listing after this bucket name
-    """
-    resources = []
-    logger.debug("Starting to list resources")
-    logger.debug(f"Configured buckets: {s3_resource.configured_buckets}")
-
-    try:
-        # Get limited number of buckets
-        buckets = await s3_resource.list_buckets(start_after)
-        logger.debug(f"Processing {len(buckets)} buckets (max: {s3_resource.max_buckets})")
-
-        # limit concurrent operations
-        async def process_bucket(bucket):
-            bucket_name = bucket['Name']
-            logger.debug(f"Processing bucket: {bucket_name}")
-
-            try:
-                # List objects in the bucket with a reasonable limit
-                objects = await s3_resource.list_objects(bucket_name, max_keys=1000)
-
-                for obj in objects:
-                    if 'Key' in obj and not obj['Key'].endswith('/'):
-                        object_key = obj['Key']
-                        mime_type = "text/plain" if s3_resource.is_text_file(object_key) else "text/markdown"
-
-                        resource = Resource(
-                            uri=f"s3://{bucket_name}/{object_key}",
-                            name=object_key,
-                            mimeType=mime_type
-                        )
-                        resources.append(resource)
-                        logger.debug(f"Added resource: {resource.uri}")
-
-            except Exception as e:
-                logger.error(f"Error listing objects in bucket {bucket_name}: {str(e)}")
-
-        # Use semaphore to limit concurrent bucket processing
-        semaphore = asyncio.Semaphore(3)  # Limit concurrent bucket processing
-        async def process_bucket_with_semaphore(bucket):
-            async with semaphore:
-                await process_bucket(bucket)
-
-        # Process buckets concurrently
-        await asyncio.gather(*[process_bucket_with_semaphore(bucket) for bucket in buckets])
-
-    except Exception as e:
-        logger.error(f"Error listing buckets: {str(e)}")
-        raise
-
-    logger.info(f"Returning {len(resources)} resources")
-    return resources
-
-
-
-@server.read_resource()
-async def read_resource(uri: AnyUrl) -> str:
-    """
-    Read content from an S3 resource and return structured response
-
-    Returns:
-        Dict containing 'contents' list with uri, mimeType, and text for each resource
-    """
-    uri_str = str(uri)
-    logger.debug(f"Reading resource: {uri_str}")
-
-    if not uri_str.startswith("s3://"):
-        raise ValueError("Invalid S3 URI")
-
-    # Parse the S3 URI
-    from urllib.parse import unquote
-    path = uri_str[5:]  # Remove "s3://"
-    path = unquote(path)  # Decode URL-encoded characters
-    parts = path.split("/", 1)
-
-    if len(parts) < 2:
-        raise ValueError("Invalid S3 URI format")
-
-    bucket_name = parts[0]
-    key = parts[1]
-
-    logger.debug(f"Attempting to read - Bucket: {bucket_name}, Key: {key}")
-
-    try:
-        response = await s3_resource.get_object(bucket_name, key)
-        content_type = response.get("ContentType", "")
-        logger.debug(f"Read MIMETYPE response: {content_type}")
-
-        # Content type mapping for specific file types
-        content_type_mapping = {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "application/markdown",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "application/csv",
-            "application/vnd.ms-excel": "application/csv"
-        }
-
-        # Check if content type needs to be modified
-        export_mime_type = content_type_mapping.get(content_type, content_type)
-        logger.debug(f"Export MIME type: {export_mime_type}")
-
-        if 'Body' in response:
-            if isinstance(response['Body'], bytes):
-                data = response['Body']
-            else:
-                # Handle streaming response
-                async with response['Body'] as stream:
-                    data = await stream.read()
-
-            # Process the data based on file type
-            if s3_resource.is_text_file(key):
-                # text_content = data.decode('utf-8')
-                text_content = base64.b64encode(data).decode('utf-8')
-
-                return text_content
-            else:
-                text_content = str(base64.b64encode(data))
-
-                result = ReadResourceResult(
-                    contents=[
-                        BlobResourceContents(
-                            blob=text_content,
-                            uri=uri_str,
-                            mimeType=export_mime_type
-                        )
-                    ]
-                )
-
-                logger.debug(result)
-
-                return text_content
-
-
-
-        else:
-            raise ValueError("No data in response body")
-
-    except Exception as e:
-        logger.error(f"Error reading object {key} from bucket {bucket_name}: {str(e)}")
-        if 'NoSuchKey' in str(e):
-            try:
-                # List similar objects to help debugging
-                objects = await s3_resource.list_objects(bucket_name, prefix=key.split('/')[0])
-                similar_objects = [obj['Key'] for obj in objects if 'Key' in obj]
-                logger.debug(f"Similar objects found: {similar_objects}")
-            except Exception as list_err:
-                logger.error(f"Error listing similar objects: {str(list_err)}")
-        raise ValueError(f"Error reading resource: {str(e)}")
-
-
 @server.list_tools()
 async def handle_list_tools() -> list[Tool]:
     return [
@@ -228,7 +74,7 @@ async def handle_list_tools() -> list[Tool]:
         ),
         Tool(
             name="GetObject", # https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html
-            description="Retrieves an object from Amazon S3. In the GetObject request, specify the full key name for the object. General purpose buckets - Both the virtual-hosted-style requests and the path-style requests are supported. For a virtual hosted-style request example, if you have the object photos/2006/February/sample.jpg, specify the object key name as /photos/2006/February/sample.jpg. For a path-style request example, if you have the object photos/2006/February/sample.jpg in the bucket named examplebucket, specify the object key name as /examplebucket/photos/2006/February/sample.jpg. Directory buckets - Only virtual-hosted-style requests are supported. For a virtual hosted-style request example, if you have the object photos/2006/February/sample.jpg in the bucket named examplebucket--use1-az5--x-s3, specify the object key name as /photos/2006/February/sample.jpg. Also, when you make requests to this API operation, your requests are sent to the Zonal endpoint. These endpoints support virtual-hosted-style requests in the format https://bucket_name.s3express-az_id.region.amazonaws.com/key-name . Path-style requests are not supported.",
+            description="Retrieves an object from Amazon S3. Supports both text files (returned as plain text) and binary files such as PDFs, images, and Office documents (returned as base64-encoded blobs with the appropriate MIME type). Specify the full key name for the object.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -285,15 +131,33 @@ async def handle_call_tool(
                 if "max_retries" in arguments:
                     args['max_retries'] = arguments['max_retries']
                 response = await s3_resource.get_object(**args)
-                logger.info(f"GetObject got response {response}")
-                file_content = response['Body'].read().decode('utf-8')
-                logger.info(f"GetObject got file_content {file_content}")
-                return [
-                    TextContent(
-                        type="text",
-                        text=str(file_content)
-                    )
-                ]
+                content_type = response.get("ContentType", "")
+                body = response['Body']
+                data = body if isinstance(body, bytes) else await body.read()
+                key = arguments['key']
+
+                if s3_resource.is_text_file(key):
+                    file_content = data.decode('utf-8')
+                    logger.info(f"GetObject returning text for {key}")
+                    return [
+                        TextContent(
+                            type="text",
+                            text=file_content
+                        )
+                    ]
+                else:
+                    encoded = base64.b64encode(data).decode('utf-8')
+                    logger.info(f"GetObject returning base64 blob for {key} ({content_type})")
+                    return [
+                        EmbeddedResource(
+                            type="resource",
+                            resource=BlobResourceContents(
+                                blob=encoded,
+                                uri=f"s3://{arguments['bucket_name']}/{key}",
+                                mimeType=content_type or "application/octet-stream"
+                            )
+                        )
+                    ]
     except Exception as error:
         return [
             TextContent(
