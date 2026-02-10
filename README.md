@@ -36,17 +36,16 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "s3-mcp-server": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/user/generative_ai/model_context_protocol/s3-mcp-server",
-        "run",
-        "s3-mcp-server"
-      ]
+      "command": "/absolute/path/to/mcp-server-s3/run.sh",
+      "args": []
     }
   }
 }
 ```
+
+The `run.sh` wrapper automatically locates `uv` by searching common installation
+paths (`~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin`, `/opt/homebrew/bin`),
+so it works even when the MCP client spawns the process with a limited `PATH`.
 
 </details>
 
@@ -103,7 +102,7 @@ experience, we strongly recommend using the [MCP Inspector](https://github.com/m
 You can launch the MCP Inspector via [`npm`](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) with this command:
 
 ```bash
-npx @modelcontextprotocol/inspector uv --directory /Users/user/generative_ai/model_context_protocol/s3-mcp-server run s3-mcp-server
+npx @modelcontextprotocol/inspector /absolute/path/to/mcp-server-s3/run.sh
 ```
 
 
