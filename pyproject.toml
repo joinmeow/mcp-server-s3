@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
  "aioboto3>=13.2.0",
+ # Keep the patched aiobotocore HTTP client floor for published installs.
+ "aiohttp>=3.14.4,<4",
  "mcp>=1.0.0",
  "python-dotenv>=1.0.1",
  "types-aiobotocore-s3>=3.1.2",
